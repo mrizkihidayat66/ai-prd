@@ -23,8 +23,9 @@ export async function POST(req: Request) {
     });
     
     return NextResponse.json({ success: true, text });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('LLM Test Error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Unknown error occurred' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Unknown error occurred';
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

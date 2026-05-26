@@ -4,7 +4,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const provider = searchParams.get('provider');
   const apiKey = searchParams.get('apiKey') || undefined;
-  let baseUrl = searchParams.get('baseUrl') || undefined;
+  const baseUrl = searchParams.get('baseUrl') || undefined;
 
   try {
     switch (provider) {
@@ -22,9 +22,9 @@ export async function GET(req: Request) {
         });
         if (!res.ok) throw new Error('Failed to fetch models');
         
-        const data = await res.json();
+        const data = await res.json() as { data: { id: string }[] };
         // Return array of purely string model IDs
-        const models = data.data.map((m: any) => m.id).sort();
+        const models = data.data.map((m) => m.id).sort();
         return NextResponse.json({ models });
       }
 
@@ -35,9 +35,9 @@ export async function GET(req: Request) {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
         if (!res.ok) throw new Error('Failed to fetch Gemini models');
 
-        const data = await res.json();
+        const data = await res.json() as { models: { name: string }[] };
         const models = data.models
-          .map((m: any) => m.name.replace('models/', ''))
+          .map((m) => m.name.replace('models/', ''))
           .filter((name: string) => name.includes('gemini'));
         return NextResponse.json({ models });
       }
@@ -47,19 +47,18 @@ export async function GET(req: Request) {
         const res = await fetch(`${url.replace('/v1', '').replace('/api', '')}/api/tags`);
         if (!res.ok) throw new Error('Failed to fetch Ollama models');
 
-        const data = await res.json();
-        const models = data.models.map((m: any) => m.name);
+        const data = await res.json() as { models: { name: string }[] };
+        const models = data.models.map((m) => m.name);
         return NextResponse.json({ models });
       }
 
       case 'anthropic': {
-        // Anthropic doesn't have a public models list endpoint yet.
         return NextResponse.json({
           models: [
+            'claude-sonnet-4-20250514',
             'claude-3-7-sonnet-20250219',
             'claude-3-5-sonnet-20241022',
             'claude-3-5-haiku-20241022',
-            'claude-3-opus-20240229',
           ],
         });
       }

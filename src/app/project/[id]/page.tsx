@@ -1,222 +1,100 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, use, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  ArrowLeft, RotateCcw, MessageCircle, FileBarChart2,
+  Loader2, Trash2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MermaidRenderer } from '@/components/mermaid-renderer';
-import {
-  PLAN_SECTION_LABELS,
-  PROJECT_STATUS_LABELS,
-  PROJECT_STATUS_COLORS,
-  type ProjectStatus,
-  type PlanSection,
-} from '@/types';
-import { useProject } from '@/hooks/use-project';
-import { restoreSnapshot, deleteSnapshot } from '@/services/project-service';
-import { generatePlan, patchPlanSection, downloadExport } from '@/services/plan-service';
+import { PrdViewer } from '@/features/plan/components/prd-viewer';
+import { VersionSelector } from '@/features/plan/components/version-selector';
+import { PROJECT_STATUS_LABELS, PROJECT_STATUS_COLORS } from '@/types';
+import type { ProjectStatus, PlanSnapshotEntry } from '@/types';
 
-const PLAN_SECTION_KEYS = Object.keys(PLAN_SECTION_LABELS) as PlanSection[];
-const DIAGRAM_SECTIONS: PlanSection[] = ['diagrams', 'dbSchema'];
+type ProjectData = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  plan: {
+    id: string;
+    version: number;
+    content: string | null;
+    snapshots: PlanSnapshotEntry[];
+  } | null;
+  conversations: Array<{ id: string; role: string; content: string; createdAt: string }>;
+};
 
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
 
-  const {
-    project,
-    commits,
-    contextLogs,
-    snapshots,
-    loading,
-    refresh,
-    refreshCommits,
-    refreshContextLogs,
-    refreshSnapshots,
-  } = useProject(id);
-
-  // ─── Plan editing state ───────────────────────────────────────────────────
-  const [editingSection, setEditingSection] = useState<PlanSection | null>(null);
-  const [editContent, setEditContent] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  // ─── Regenerate state ─────────────────────────────────────────────────────
+  const [project, setProject] = useState<ProjectData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
-  const [showRegenerateDialog, setShowRegenerateDialog] = useState(false);
-  const [sectionsToRegenerate, setSectionsToRegenerate] = useState<PlanSection[]>(PLAN_SECTION_KEYS);
-
-  // ─── History / snapshot state ─────────────────────────────────────────────
-  const [showHistoryDialog, setShowHistoryDialog] = useState(false);
-  const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
-  const [deletingSnapshotId, setDeletingSnapshotId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
 
-  // ─── Delete state ─────────────────────────────────────────────────────────
-  const [deleting, setDeleting] = useState(false);
-
-  // ─── Autopilot ────────────────────────────────────────────────────────────
-  const [autopilotStep, setAutopilotStep] = useState(0);
+  const fetchProject = useCallback(async () => {
+    const res = await fetch(`/api/projects/${id}`);
+    if (res.ok) {
+      const data = await res.json();
+      setProject(data.project);
+    }
+    setLoading(false);
+  }, [id]);
 
   useEffect(() => {
-    const autopilotParam = new URLSearchParams(window.location.search).get('autopilot');
-    if (autopilotParam !== 'true' || !project || autopilotStep > 0) return;
+    void fetchProject();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
-    async function runFullAutopilot() {
-      const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-      const log = (step: number, msg: string) => console.log(`[AUTOPILOT Step ${step}] ${msg}`);
-
-      setAutopilotStep(5);
-      log(5, 'Verifying plan sections are populated...');
-      await delay(2000);
-
-      setAutopilotStep(6);
-      log(6, 'Editing PRD section...');
-      try {
-        const currentPrd = String(project?.plan?.['prd'] ?? '');
-        await patchPlanSection(
-          id,
-          'prd',
-          currentPrd ? currentPrd + '\n\n> _Edited by autopilot test._' : '# PRD\n\n> _Generated by autopilot test._'
-        );
-        log(6, 'PRD section edited successfully.');
-      } catch (e) {
-        log(6, 'Edit failed: ' + e);
-      }
-      await refresh();
-      await delay(1500);
-
-      setAutopilotStep(7);
-      log(7, 'Triggering ZIP export...');
-      try {
-        const exportRes = await fetch(`/api/projects/${id}/export`);
-        log(7, `Export response status: ${exportRes.status}`);
-      } catch (e) {
-        log(7, 'Export check failed: ' + e);
-      }
-      await delay(1500);
-
-      setAutopilotStep(8);
-      log(8, 'Pushing mock commit...');
-      await fetch(`/api/projects/${id}/commit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          version: 'v0.1.0-alpha',
-          message: 'Initialized project structure and configured routing',
-          author: 'init-ai-bot',
-          diff: '@@ -0,0 +1,5 @@\n+export default function App() {\n+  return <div>Hello World</div>;\n+}',
-        }),
-      });
-      await refreshCommits();
-      await delay(1500);
-
-      setAutopilotStep(9);
-      log(9, 'Pushing mock context log...');
-      await fetch(`/api/projects/${id}/context`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source: 'autopilot',
-          type: 'milestone',
-          content: 'Finished scaffold! Moving to database schema deployment.',
-        }),
-      });
-      await refreshContextLogs();
-      await delay(1500);
-
-      setAutopilotStep(10);
-      log(10, 'E2E pipeline complete.');
-      await delay(2000);
-
-      const newUrl = new URL(window.location.href);
-      newUrl.searchParams.delete('autopilot');
-      window.history.replaceState({}, '', newUrl.toString());
-      console.log('[AUTOPILOT] ✅ Full E2E test pipeline complete!');
-      setAutopilotStep(11);
-    }
-
-    void runFullAutopilot();
-  }, [project, autopilotStep, id, refresh, refreshCommits, refreshContextLogs]);
-
-  // ─── Actions ──────────────────────────────────────────────────────────────
-
-  async function handleExport() {
-    if (!project) return;
-    try {
-      await downloadExport(id, project.name);
-    } catch (e) {
-      console.error('Export error:', e);
-      alert('Export failed. See console for details.');
-    }
-  }
-
-  async function handleSaveSection() {
-    if (!editingSection) return;
-    setSaving(true);
-    try {
-      await patchPlanSection(id, editingSection, editContent);
-      await refresh();
-      setEditingSection(null);
-    } catch (e) {
-      console.error('Save error:', e);
-    }
-    setSaving(false);
-  }
-
-  function openRegenerateDialog() {
-    const available = PLAN_SECTION_KEYS.filter((key) =>
-      project?.plan ? key in project.plan : true
-    );
-    setSectionsToRegenerate(available.length > 0 ? available : PLAN_SECTION_KEYS);
-    setShowRegenerateDialog(true);
-  }
-
-  async function handleConfirmRegenerate() {
-    if (sectionsToRegenerate.length === 0) return;
-    setShowRegenerateDialog(false);
+  async function handleRegenerate() {
     setRegenerating(true);
     try {
-      await generatePlan(id, sectionsToRegenerate);
-      await refresh();
+      const res = await fetch(`/api/projects/${id}/generate`, { method: 'POST' });
+      if (res.ok) {
+        await fetchProject();
+      }
     } catch (e) {
-      console.error('Regenerate error:', e);
+      console.error('Regenerate failed:', e);
     }
     setRegenerating(false);
   }
 
-  async function handleRestoreSnapshot(snapshotId: string) {
+  async function handleRestore(snapshotId: string) {
     setRestoring(true);
     try {
-      await restoreSnapshot(id, snapshotId);
-      await refresh();
-      await refreshSnapshots();
+      const snapshot = project?.plan?.snapshots.find((s) => s.id === snapshotId);
+      if (snapshot && project?.plan) {
+        await fetch(`/api/projects/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'PLAN_GENERATED' }),
+        });
+        await fetch(`/api/projects/${id}/plan`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: snapshot.content }),
+        });
+        await fetchProject();
+        setPreviewContent(null);
+      }
     } catch (e) {
-      console.error('Restore error:', e);
+      console.error('Restore failed:', e);
     }
-    setShowHistoryDialog(false);
-    setConfirmRestoreId(null);
     setRestoring(false);
   }
 
-  async function handleDeleteSnapshot(snapshotId: string) {
-    try {
-      await deleteSnapshot(id, snapshotId);
-      await refreshSnapshots();
-    } catch (e) {
-      console.error('Delete snapshot error:', e);
-    }
-    setDeletingSnapshotId(null);
-  }
-
-  async function handleDeleteProject() {
+  async function handleDelete() {
     if (!confirm(`Delete "${project?.name}"? This cannot be undone.`)) return;
     setDeleting(true);
     try {
@@ -228,80 +106,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
-  // ─── Plan section render ──────────────────────────────────────────────────
-
-  function renderPlanSection(sectionKey: PlanSection) {
-    const content = String(project?.plan?.[sectionKey] ?? '');
-    const isEditing = editingSection === sectionKey;
-    const isDiagram = DIAGRAM_SECTIONS.includes(sectionKey);
-
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">
-            {PLAN_SECTION_LABELS[sectionKey]}
-          </h3>
-          {!isEditing && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => {
-                setEditingSection(sectionKey);
-                setEditContent(content);
-              }}
-            >
-              ✏️ Edit
-            </Button>
-          )}
-        </div>
-
-        {isEditing ? (
-          <div className="space-y-2">
-            <Textarea
-              value={editContent}
-              onChange={(e) => setEditContent(e.target.value)}
-              className="min-h-[400px] font-mono text-sm bg-muted/50 border-border/50"
-            />
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                onClick={handleSaveSection}
-                disabled={saving}
-                className="bg-gradient-to-r from-violet-600 to-cyan-600 text-white"
-              >
-                {saving ? 'Saving…' : '💾 Save'}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setEditingSection(null)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : content ? (
-          <div className="prose prose-invert prose-sm max-w-none">
-            {isDiagram ? (
-              <MermaidRenderer content={content} />
-            ) : (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-            )}
-          </div>
-        ) : (
-          <p className="text-muted-foreground text-sm italic">No content yet.</p>
-        )}
-      </div>
-    );
-  }
-
-  // ─── Loading state ────────────────────────────────────────────────────────
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen text-muted-foreground">
-        <span className="animate-pulse">Loading project…</span>
+        <span className="animate-pulse">Loading project...</span>
       </div>
     );
   }
@@ -315,18 +123,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const status = project.status as ProjectStatus;
-  const hasPlan = Boolean(project.plan);
-
-  // ─── Render ───────────────────────────────────────────────────────────────
+  const hasPlan = Boolean(project.plan?.content);
+  const prdContent = previewContent ?? project.plan?.content ?? '';
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
       <header className="sticky top-0 z-10 border-b border-border/40 backdrop-blur-xl bg-background/80 px-6 py-3">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <Button variant="ghost" size="sm" onClick={() => router.push('/')}>
-              ← Back
+              <ArrowLeft className="w-4 h-4 mr-1" /> Back
             </Button>
             <h1 className="font-semibold truncate">{project.name}</h1>
             <Badge
@@ -334,109 +140,77 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             >
               {PROJECT_STATUS_LABELS[status] ?? project.status}
             </Badge>
-            {autopilotStep > 0 && autopilotStep < 11 && (
-              <Badge className="bg-amber-500/20 text-amber-400 border-0 text-[10px]">
-                🤖 Autopilot step {autopilotStep}
-              </Badge>
-            )}
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
             {hasPlan && (
               <>
+                <VersionSelector
+                  currentVersion={project.plan!.version}
+                  snapshots={project.plan!.snapshots}
+                  onRestore={handleRestore}
+                  onSelectPreview={setPreviewContent}
+                  restoring={restoring}
+                />
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setShowHistoryDialog(true)}
-                  className="h-8 text-xs"
-                >
-                  🕐 History ({snapshots.length})
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={openRegenerateDialog}
+                  onClick={handleRegenerate}
                   disabled={regenerating}
                   className="h-8 text-xs"
                 >
-                  {regenerating ? '⏳ Regenerating…' : '🔄 Regenerate'}
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleExport}
-                  className="h-8 text-xs bg-gradient-to-r from-violet-600 to-cyan-600 text-white"
-                >
-                  📦 Export ZIP
+                  {regenerating ? (
+                    <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Regenerating...</>
+                  ) : (
+                    <><RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Regenerate</>
+                  )}
                 </Button>
               </>
             )}
-            {!hasPlan && project.status !== 'PLAN_GENERATED' && (
+            {!hasPlan && (
               <Button
                 size="sm"
                 onClick={() => router.push(`/new?projectId=${id}`)}
-                className="h-8 text-xs bg-gradient-to-r from-violet-600 to-cyan-600 text-white"
+                className="h-8 text-xs"
               >
-                💬 Continue Chat
+                <MessageCircle className="w-3.5 h-3.5 mr-1.5" /> Continue Chat
               </Button>
             )}
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleDeleteProject}
+              onClick={handleDelete}
               disabled={deleting}
               className="h-8 text-xs text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
             >
-              {deleting ? '…' : '🗑️'}
+              {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
             </Button>
           </div>
         </div>
       </header>
 
-      {/* Main content */}
       <div className="max-w-6xl mx-auto px-6 py-6">
-        <Tabs defaultValue={hasPlan ? 'plan' : 'chat'}>
+        <Tabs defaultValue={hasPlan ? 'prd' : 'chat'}>
           <TabsList className="mb-6 bg-muted/50">
-            {hasPlan && <TabsTrigger value="plan">📋 Plan</TabsTrigger>}
-            <TabsTrigger value="chat">💬 Chat</TabsTrigger>
-            <TabsTrigger value="commits">
-              🔖 Commits ({commits.length})
-            </TabsTrigger>
-            <TabsTrigger value="context">
-              📊 Context ({contextLogs.length})
+            {hasPlan && (
+              <TabsTrigger value="prd">
+                <FileBarChart2 className="w-3.5 h-3.5 mr-1.5" />PRD
+              </TabsTrigger>
+            )}
+            <TabsTrigger value="chat">
+              <MessageCircle className="w-3.5 h-3.5 mr-1.5" />Chat History
             </TabsTrigger>
           </TabsList>
 
-          {/* Plan tab */}
           {hasPlan && (
-            <TabsContent value="plan">
-              <Tabs defaultValue={PLAN_SECTION_KEYS[0]} orientation="vertical" className="flex gap-6">
-                <TabsList className="flex-col h-auto w-48 bg-muted/30 shrink-0 rounded-xl p-1">
-                  {PLAN_SECTION_KEYS.map((key) => (
-                    <TabsTrigger
-                      key={key}
-                      value={key}
-                      className="w-full justify-start text-xs px-3 py-2"
-                    >
-                      {PLAN_SECTION_LABELS[key]}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                <div className="flex-1 min-w-0">
-                  {PLAN_SECTION_KEYS.map((key) => (
-                    <TabsContent key={key} value={key} className="mt-0">
-                      <Card className="bg-card/60 border-border/40">
-                        <CardContent className="p-6">
-                          {renderPlanSection(key)}
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-                  ))}
-                </div>
-              </Tabs>
+            <TabsContent value="prd">
+              <PrdViewer
+                content={prdContent}
+                projectName={project.name}
+              />
             </TabsContent>
           )}
 
-          {/* Chat tab */}
           <TabsContent value="chat">
             <Card className="bg-card/60 border-border/40">
               <CardHeader>
@@ -460,11 +234,19 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                           <div
                             className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${
                               c.role === 'USER'
-                                ? 'bg-violet-600/20 text-violet-100 rounded-tr-sm'
-                                : 'bg-muted/50 text-foreground rounded-tl-sm border border-border/40'
+                                ? 'bg-primary/15 text-foreground rounded-tr-sm'
+                                : 'bg-muted text-foreground rounded-tl-sm border border-border/40'
                             }`}
                           >
-                            <p className="whitespace-pre-wrap text-xs">{c.content.substring(0, 500)}</p>
+                            {c.role === 'USER' ? (
+                              <p className="whitespace-pre-wrap text-xs">{c.content}</p>
+                            ) : (
+                              <div className="prose prose-invert prose-xs max-w-none text-xs">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  {c.content}
+                                </ReactMarkdown>
+                              </div>
+                            )}
                             <p className="text-[10px] text-muted-foreground/60 mt-1">
                               {new Date(c.createdAt).toLocaleString()}
                             </p>
@@ -477,211 +259,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               </CardContent>
             </Card>
           </TabsContent>
-
-          {/* Commits tab */}
-          <TabsContent value="commits">
-            <div className="space-y-3">
-              {commits.length === 0 ? (
-                <Card className="bg-card/60 border-border/40">
-                  <CardContent className="py-12 text-center text-muted-foreground text-sm">
-                    No commits yet.
-                  </CardContent>
-                </Card>
-              ) : (
-                commits.map((c) => (
-                  <Card key={c.id} className="bg-card/60 border-border/40">
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="font-mono text-xs text-violet-400">{c.version}</p>
-                          <p className="font-medium text-sm mt-0.5">{c.message}</p>
-                          <p className="text-xs text-muted-foreground mt-1">by {c.author}</p>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground shrink-0">
-                          {new Date(c.createdAt).toLocaleDateString()}
-                        </p>
-                      </div>
-                      {c.diff && (
-                        <pre className="mt-3 text-[10px] bg-muted/50 rounded-lg p-3 overflow-x-auto font-mono text-muted-foreground">
-                          {c.diff}
-                        </pre>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))
-              )}
-            </div>
-          </TabsContent>
-
-          {/* Context logs tab */}
-          <TabsContent value="context">
-            <div className="space-y-3">
-              {contextLogs.length === 0 ? (
-                <Card className="bg-card/60 border-border/40">
-                  <CardContent className="py-12 text-center text-muted-foreground text-sm">
-                    No context logs yet.
-                  </CardContent>
-                </Card>
-              ) : (
-                contextLogs.map((log) => (
-                  <Card key={log.id} className="bg-card/60 border-border/40">
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <Badge variant="outline" className="text-[10px]">
-                          {log.source}
-                        </Badge>
-                        <Badge variant="outline" className="text-[10px]">
-                          {log.type}
-                        </Badge>
-                        <p className="text-[10px] text-muted-foreground ml-auto">
-                          {new Date(log.createdAt).toLocaleString()}
-                        </p>
-                      </div>
-                      <p className="text-sm text-muted-foreground">{log.content}</p>
-                    </CardContent>
-                  </Card>
-                ))
-              )}
-            </div>
-          </TabsContent>
         </Tabs>
       </div>
-
-      {/* ── Regenerate Dialog ────────────────────────────────────────────────── */}
-      <Dialog open={showRegenerateDialog} onOpenChange={setShowRegenerateDialog}>
-        <DialogContent className="max-w-md bg-card/95 backdrop-blur-xl border-border/40">
-          <DialogHeader>
-            <DialogTitle>🔄 Regenerate Plan Sections</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground">
-              Select the sections to regenerate. Existing content will be overwritten (a snapshot
-              will be saved first).
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {PLAN_SECTION_KEYS.map((key) => {
-                const selected = sectionsToRegenerate.includes(key);
-                return (
-                  <button
-                    key={key}
-                    onClick={() =>
-                      setSectionsToRegenerate((prev) =>
-                        prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key]
-                      )
-                    }
-                    className={`px-3 py-2 rounded-lg text-xs border text-left transition-all ${
-                      selected
-                        ? 'bg-violet-600/20 border-violet-500/50 text-violet-300'
-                        : 'bg-muted/30 border-border/40 text-muted-foreground hover:border-border/60'
-                    }`}
-                  >
-                    {selected ? '✓ ' : ''}
-                    {PLAN_SECTION_LABELS[key]}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex gap-2 pt-2">
-              <Button
-                onClick={handleConfirmRegenerate}
-                disabled={sectionsToRegenerate.length === 0}
-                className="flex-1 bg-gradient-to-r from-violet-600 to-cyan-600 text-white"
-              >
-                Regenerate {sectionsToRegenerate.length} section
-                {sectionsToRegenerate.length !== 1 ? 's' : ''}
-              </Button>
-              <Button variant="outline" onClick={() => setShowRegenerateDialog(false)}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── History Dialog ───────────────────────────────────────────────────── */}
-      <Dialog open={showHistoryDialog} onOpenChange={setShowHistoryDialog}>
-        <DialogContent className="max-w-md bg-card/95 backdrop-blur-xl border-border/40">
-          <DialogHeader>
-            <DialogTitle>🕐 Plan History</DialogTitle>
-          </DialogHeader>
-          <ScrollArea className="max-h-96">
-            {snapshots.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">
-                No snapshots yet. Snapshots are saved automatically before regeneration.
-              </p>
-            ) : (
-              <div className="space-y-2 pr-2">
-                {snapshots.map((snap) => (
-                  <Card key={snap.id} className="bg-muted/30 border-border/40">
-                    <CardContent className="p-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Plan v{snap.version}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(snap.createdAt).toLocaleString()}
-                          </p>
-                        </div>
-                        <div className="flex gap-1">
-                          {confirmRestoreId === snap.id ? (
-                            <>
-                              <Button
-                                size="sm"
-                                className="h-7 text-xs bg-violet-600 text-white"
-                                onClick={() => void handleRestoreSnapshot(snap.id)}
-                                disabled={restoring}
-                              >
-                                {restoring ? '…' : 'Confirm'}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 text-xs"
-                                onClick={() => setConfirmRestoreId(null)}
-                              >
-                                Cancel
-                              </Button>
-                            </>
-                          ) : (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs"
-                                onClick={() => setConfirmRestoreId(snap.id)}
-                              >
-                                Restore
-                              </Button>
-                              {deletingSnapshotId === snap.id ? (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 text-xs text-red-400"
-                                  onClick={() => void handleDeleteSnapshot(snap.id)}
-                                >
-                                  Confirm
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 text-xs text-muted-foreground"
-                                  onClick={() => setDeletingSnapshotId(snap.id)}
-                                >
-                                  🗑️
-                                </Button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

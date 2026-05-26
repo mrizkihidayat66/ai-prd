@@ -5,14 +5,13 @@ function isMissingTableError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2021';
 }
 
-// GET /api/projects - List all projects
 export async function GET() {
   try {
     const projects = await prisma.project.findMany({
       orderBy: { updatedAt: 'desc' },
       include: {
         plan: { select: { id: true, version: true } },
-        _count: { select: { conversations: true, commits: true, contextLogs: true } },
+        _count: { select: { conversations: true } },
       },
     });
     return NextResponse.json({ projects });
@@ -27,7 +26,6 @@ export async function GET() {
   }
 }
 
-// POST /api/projects - Create a new project
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const { name, description } = body;

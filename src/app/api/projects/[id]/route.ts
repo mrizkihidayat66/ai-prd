@@ -3,15 +3,13 @@ import { prisma } from '@/lib/db';
 
 type Params = { params: Promise<{ id: string }> };
 
-// GET /api/projects/:id
 export async function GET(_request: NextRequest, { params }: Params) {
   const { id } = await params;
   const project = await prisma.project.findUnique({
     where: { id },
     include: {
-      plan: true,
+      plan: { include: { snapshots: { orderBy: { createdAt: 'desc' } } } },
       conversations: { orderBy: { createdAt: 'asc' } },
-      _count: { select: { commits: true, contextLogs: true } },
     },
   });
 
@@ -22,7 +20,6 @@ export async function GET(_request: NextRequest, { params }: Params) {
   return NextResponse.json({ project });
 }
 
-// PATCH /api/projects/:id
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { id } = await params;
   const body = await request.json();
@@ -40,7 +37,6 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   return NextResponse.json({ project });
 }
 
-// DELETE /api/projects/:id
 export async function DELETE(_request: NextRequest, { params }: Params) {
   const { id } = await params;
   await prisma.project.delete({ where: { id } });

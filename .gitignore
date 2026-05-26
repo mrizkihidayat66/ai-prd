@@ -48,3 +48,11 @@ next-env.d.ts
 /prisma/*.db-journal
 /prisma/*.db-wal
 /prisma/*.db-shm
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.idea/
+.vscode/
+.claude/

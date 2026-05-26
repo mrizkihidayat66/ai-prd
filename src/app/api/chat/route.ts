@@ -1,219 +1,112 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { streamText, tool } from 'ai';
+import { z } from 'zod';
 import { prisma } from '@/lib/db';
-import { generateText } from 'ai';
 import { getSettings, getModel } from '@/lib/ai/provider';
 import { CLARIFY_SYSTEM_PROMPT } from '@/lib/ai/prompts/clarify';
-import { jsonrepair } from 'jsonrepair';
-import { clarifyResponseSchema } from '@/lib/ai/schemas';
 
-type ParsedResponse = {
-  status: 'needs_clarification' | 'requirements_complete';
-  covered?: string[];
-  missing?: string[];
-  questions?: Array<{
-    id?: string;
-    dimension?: string;
-    question?: string;
-    options?: string[];
-    recommendation?: string;
-  }>;
-  summary?: Record<string, unknown>;
-};
-
-function parseModelPayload(text: string): ParsedResponse | null {
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonStr = jsonMatch ? jsonMatch[1] : text;
-
-  let potentialJson = jsonStr;
-  if (!jsonMatch) {
-    const firstCurly = text.indexOf('{');
-    const lastCurly = text.lastIndexOf('}');
-    if (firstCurly !== -1 && lastCurly !== -1) {
-      potentialJson = text.substring(firstCurly, lastCurly + 1);
-    }
-  }
-
-  try {
-    return JSON.parse(potentialJson.trim());
-  } catch {
-    try {
-      const repaired = jsonrepair(potentialJson.trim());
-      return JSON.parse(repaired);
-    } catch {
-      return null;
-    }
-  }
-}
-
-function getConversationalPrefix(text: string): string {
-  const clean = text.replace(/```(?:json)?[\s\S]*?(```|$)/g, '').trim();
-  return clean || 'Thanks. I reviewed your input and prepared the next clarification step.';
-}
-
-function fallbackQuestionForDimension(dimension: string, idx: number) {
-  const defaults: Record<string, { q: string; o: string[]; r: string }> = {
-    problem: {
-      q: 'Who is the primary target user and what pain should this product solve first?',
-      o: ['Internal team workflow', 'Small business operations', 'Consumer productivity', 'Other'],
-      r: 'Start from one clear user segment and one measurable pain point.',
-    },
-    features: {
-      q: 'Which feature must be included in MVP before launch?',
-      o: ['Project/task CRUD', 'Real-time collaboration', 'Notifications', 'Other'],
-      r: 'Define one core workflow end-to-end before adding advanced features.',
-    },
-    tech_stack: {
-      q: 'Which stack should we optimize for implementation speed and maintainability?',
-      o: ['Next.js + TypeScript', 'Python FastAPI + React', 'Node + Express', 'No strong preference'],
-      r: 'Use a single typed full-stack setup when speed is the priority.',
-    },
-    data_model: {
-      q: 'Which entities are mandatory in the first schema revision?',
-      o: ['Users, Projects, Tasks', 'Users, Workspaces, Tickets', 'Users, Plans, Commits', 'Other'],
-      r: 'Keep the initial schema small and normalize relationships early.',
-    },
-    auth: {
-      q: 'What authentication and role scope is required for v1?',
-      o: ['Email/password only', 'OAuth + email/password', 'No auth for MVP', 'Other'],
-      r: 'Choose the minimum secure auth flow that fits MVP usage.',
-    },
-    integrations: {
-      q: 'Do you need third-party integrations in MVP?',
-      o: ['None for MVP', 'Payments', 'Email/notifications', 'Analytics'],
-      r: 'Defer non-essential integrations unless they are core to user value.',
-    },
-    deployment: {
-      q: 'Where should the first production deployment run?',
-      o: ['VPS / Docker', 'Managed cloud platform', 'Self-hosted on-prem', 'Not decided yet'],
-      r: 'Pick a deployment target early to avoid infra rework later.',
-    },
-    design: {
-      q: 'What UX style and complexity level do you want for MVP?',
-      o: ['Minimal dashboard UI', 'Modern SaaS style', 'Mobile-first workflow', 'Other'],
-      r: 'Keep visual scope constrained while validating product workflow.',
-    },
-  };
-
-  const d = defaults[dimension] ?? defaults.features;
-  return {
-    id: `fallback_${dimension || 'q'}_${idx + 1}`,
-    dimension: dimension || 'general',
-    question: d.q,
-    options: d.o,
-    recommendation: d.r,
-  };
-}
-
-function normalizeClarifyPayload(payload: ParsedResponse | null): ParsedResponse {
-  if (!payload || (payload.status !== 'needs_clarification' && payload.status !== 'requirements_complete')) {
-    return {
-      status: 'needs_clarification',
-      covered: [],
-      missing: ['problem', 'features', 'tech_stack', 'data_model', 'auth', 'integrations', 'deployment', 'design'],
-      questions: [fallbackQuestionForDimension('problem', 0), fallbackQuestionForDimension('features', 1)],
-    };
-  }
-
-  if (payload.status === 'requirements_complete') {
-    return payload;
-  }
-
-  const covered = Array.isArray(payload.covered) ? payload.covered.filter(Boolean) : [];
-  const missing = Array.isArray(payload.missing) ? payload.missing.filter(Boolean) : [];
-  const rawQuestions = Array.isArray(payload.questions) ? payload.questions : [];
-
-  let questions = rawQuestions.map((q, idx) => {
-    const options = Array.from(new Set([...(Array.isArray(q.options) ? q.options.filter(Boolean) : []), 'Other']));
-    return {
-      id: q.id || `q_${idx + 1}`,
-      dimension: q.dimension || missing[idx] || 'general',
-      question: q.question || fallbackQuestionForDimension(missing[idx] || 'features', idx).question,
-      options: options.length > 1 ? options : fallbackQuestionForDimension(missing[idx] || 'features', idx).options,
-      recommendation:
-        q.recommendation || fallbackQuestionForDimension(missing[idx] || 'features', idx).recommendation,
-    };
-  });
-
-  if (questions.length === 0) {
-    const sourceDims = missing.length > 0 ? missing.slice(0, 2) : ['features', 'tech_stack'];
-    questions = sourceDims.map((dim, idx) => fallbackQuestionForDimension(dim, idx));
-  }
-
-  return {
-    status: 'needs_clarification',
-    covered,
-    missing,
-    questions,
-  };
-}
-
-// POST /api/chat - Handle the clarification conversation loop
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { projectId, message } = body;
+  const { messages, projectId } = await request.json();
 
-  if (!projectId || !message) {
-    return NextResponse.json(
-      { error: 'projectId and message are required' },
-      { status: 400 }
-    );
+  if (!projectId) {
+    return new Response('projectId is required', { status: 400 });
   }
 
-  // Save user message
-  await prisma.conversation.create({
-    data: {
-      projectId,
-      role: 'USER',
-      content: message,
-    },
-  });
-
-  // Get full conversation history
-  const conversations = await prisma.conversation.findMany({
-    where: { projectId },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  const messages = conversations.map((c) => ({
-    role: c.role.toLowerCase() as 'user' | 'assistant' | 'system',
-    content: c.content,
-  }));
+  const lastMsg = messages[messages.length - 1];
+  if (lastMsg?.role === 'user') {
+    const textContent = lastMsg.parts
+      ?.filter((p: { type: string }) => p.type === 'text')
+      .map((p: { text: string }) => p.text)
+      .join('') || JSON.stringify(lastMsg.content ?? '');
+    await prisma.conversation.create({
+      data: { projectId, role: 'USER', content: textContent },
+    });
+  }
 
   const settings = await getSettings();
   const model = getModel(settings);
 
-
-
-  const result = await generateText({
+  const result = streamText({
     model,
     system: CLARIFY_SYSTEM_PROMPT,
     messages,
+    tools: {
+      ask_clarification: tool({
+        description: 'Ask the user clarification questions with selectable options. Use this when you need structured input.',
+        inputSchema: z.object({
+          questions: z.array(z.object({
+            id: z.string().describe('Unique question identifier'),
+            dimension: z.string().describe('Which requirement dimension this covers'),
+            question: z.string().describe('The question to ask'),
+            options: z.array(z.string()).describe('Selectable options for the user'),
+            recommendation: z.string().describe('Your recommendation and why'),
+          })),
+        }),
+      }),
+      mark_requirements_complete: tool({
+        description: 'Signal that all requirements are gathered. Use this when all 8 dimensions are covered and the user has confirmed.',
+        inputSchema: z.object({
+          summary: z.object({
+            projectName: z.string(),
+            problemStatement: z.string(),
+            targetAudience: z.string(),
+            coreFeatures: z.array(z.string()),
+            techStack: z.object({
+              frontend: z.string(),
+              backend: z.string(),
+              database: z.string(),
+              hosting: z.string(),
+            }),
+            dataModel: z.array(z.string()),
+            auth: z.object({
+              required: z.boolean(),
+              method: z.string(),
+              roles: z.array(z.string()),
+            }),
+            integrations: z.array(z.string()),
+            deployment: z.string(),
+            designNotes: z.string(),
+          }),
+        }),
+      }),
+      web_search: tool({
+        description: 'Search the web for technical information, best practices, or reference material relevant to the project.',
+        inputSchema: z.object({
+          query: z.string().describe('Search query'),
+        }),
+        execute: async (input) => {
+          try {
+            const res = await fetch(
+              `https://html.duckduckgo.com/html/?q=${encodeURIComponent(input.query)}`,
+              { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ai-prd/1.0)' } }
+            );
+            const html = await res.text();
+            const results: { title: string; snippet: string; url: string }[] = [];
+            const regex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/g;
+            let match;
+            while ((match = regex.exec(html)) !== null && results.length < 5) {
+              results.push({
+                url: decodeURIComponent(match[1].replace(/.*uddg=/, '').split('&')[0]),
+                title: match[2].replace(/<[^>]*>/g, ''),
+                snippet: match[3].replace(/<[^>]*>/g, ''),
+              });
+            }
+            return { results };
+          } catch {
+            return { results: [], error: 'Search failed' };
+          }
+        },
+      }),
+    },
     temperature: settings.temperature,
-  });
-
-  const parsed = normalizeClarifyPayload(parseModelPayload(result.text));
-  const conversational = getConversationalPrefix(result.text);
-  const normalizedText = `${conversational}\n\n\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
-
-  // Validate schema shape (silent — normalization already applied above)
-  clarifyResponseSchema.safeParse(parsed);
-
-  await prisma.conversation.create({
-    data: {
-      projectId,
-      role: 'ASSISTANT',
-      content: normalizedText,
+    onFinish: async ({ text }) => {
+      if (text) {
+        await prisma.conversation.create({
+          data: { projectId, role: 'ASSISTANT', content: text },
+        });
+      }
     },
   });
 
-  if (parsed.status === 'requirements_complete') {
-    await prisma.project.update({
-      where: { id: projectId },
-      data: { status: 'REQUIREMENTS_LOCKED' },
-    });
-  }
-
-  return new Response(normalizedText, {
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-  });
+  return result.toUIMessageStreamResponse();
 }
