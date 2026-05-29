@@ -1,5 +1,8 @@
 import type { ProjectStatus } from '@/types';
 
+// Re-export limits
+export * from './limits';
+
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   CLARIFYING: 'Clarifying',
   REQUIREMENTS_LOCKED: 'Requirements Locked',

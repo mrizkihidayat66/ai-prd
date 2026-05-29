@@ -55,12 +55,12 @@ try {
   }
 
   if (!fs.existsSync(dbPath)) {
-    throw new Error(`Database file not found at ${dbPath}. Run: bun run db:migrate`);
+    throw new Error(`Database file not found at ${dbPath}. Run: npm run db:migrate`);
   }
 
   const dbStats = fs.statSync(dbPath);
   if (!dbStats.isFile() || dbStats.size === 0) {
-    throw new Error(`Database file is empty or invalid at ${dbPath}. Run: bun run db:migrate`);
+    throw new Error(`Database file is empty or invalid at ${dbPath}. Run: npm run db:migrate`);
   }
 
   if (!hasAnyApiKey) {

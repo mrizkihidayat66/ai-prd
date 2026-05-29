@@ -48,50 +48,60 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* ─── Light mode (unused — app is dark-only) ────────────────────────── */
+/* ─── Light mode ─────────────────────────────────────────────────────────── */
 :root {
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0.002 285);
+  --foreground: oklch(0.145 0.005 285);
+
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.145 0.005 285);
+
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.488 0.243 264.376); /* indigo-600 */
+  --popover-foreground: oklch(0.145 0.005 285);
+
+  --primary: oklch(0.488 0.243 264.376);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+
+  --secondary: oklch(0.96 0.003 285);
+  --secondary-foreground: oklch(0.205 0.006 285);
+
+  --muted: oklch(0.955 0.003 285);
+  --muted-foreground: oklch(0.45 0.01 285);
+
   --accent: oklch(0.488 0.243 264.376);
   --accent-foreground: oklch(0.985 0 0);
+
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --border: oklch(0.88 0.005 285);
+  --input: oklch(0.88 0.005 285);
   --ring: oklch(0.488 0.243 264.376);
+
   --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.556 0.15 264);
-  --chart-3: oklch(0.439 0.1 264);
-  --chart-4: oklch(0.371 0.08 264);
-  --chart-5: oklch(0.269 0.05 264);
+  --chart-2: oklch(0.527 0.154 150);
+  --chart-3: oklch(0.7 0.17 70);
+  --chart-4: oklch(0.524 0.223 27);
+  --chart-5: oklch(0.45 0.01 285);
+
   --radius: 0.625rem;
-  --sidebar: oklch(0.97 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
+
+  --sidebar: oklch(0.97 0.002 285);
+  --sidebar-foreground: oklch(0.145 0.005 285);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.93 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-accent: oklch(0.94 0.003 285);
+  --sidebar-accent-foreground: oklch(0.205 0.006 285);
+  --sidebar-border: oklch(0.88 0.005 285);
   --sidebar-ring: oklch(0.488 0.243 264.376);
 
   /* ── Semantic tokens ── */
-  --color-success: oklch(0.527 0.154 150);
-  --color-warning: oklch(0.7 0.17 70);
-  --color-danger: oklch(0.577 0.245 27.325);
+  --color-success: oklch(0.45 0.16 150);
+  --color-warning: oklch(0.6 0.17 70);
+  --color-danger: oklch(0.52 0.22 27);
   --color-info: oklch(0.488 0.243 264.376);
 
   /* ── Surface levels ── */
   --surface: oklch(1 0 0);
-  --surface-raised: oklch(0.97 0 0);
+  --surface-raised: oklch(0.97 0.002 285);
 }
 
 /* ─── Dark mode ──────────────────────────────────────────────────────────── */
@@ -157,4 +167,48 @@
   body {
     @apply bg-background text-foreground antialiased font-sans selection:bg-indigo-500/30;
   }
+}
+
+/* ─── React Diff View Custom Styles ──────────────────────────────────── */
+.diff-viewer-wrapper {
+  @apply text-sm font-mono;
+}
+
+.diff-viewer-wrapper .diff-gutter {
+  @apply bg-muted/30 text-muted-foreground border-r border-border/40;
+  width: 40px;
+  text-align: center;
+  user-select: none;
+}
+
+.diff-viewer-wrapper .diff-gutter-insert {
+  @apply bg-emerald-500/10 text-emerald-400;
+}
+
+.diff-viewer-wrapper .diff-gutter-delete {
+  @apply bg-red-500/10 text-red-400;
+}
+
+.diff-viewer-wrapper .diff-gutter-hover {
+  @apply bg-primary/10;
+}
+
+.diff-viewer-wrapper .diff-code {
+  @apply bg-card;
+}
+
+.diff-viewer-wrapper .diff-code-insert {
+  @apply bg-emerald-500/5;
+}
+
+.diff-viewer-wrapper .diff-code-delete {
+  @apply bg-red-500/5;
+}
+
+.diff-viewer-wrapper .diff-line {
+  @apply border-b border-border/20;
+}
+
+.diff-viewer-wrapper table {
+  @apply w-full border-collapse;
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,23 +27,32 @@ export function VersionSelector({
   onSelectPreview,
   restoring,
 }: Props) {
+  const [selectedValue, setSelectedValue] = useState<string>('current');
+
   if (snapshots.length === 0) return null;
 
+  function handleValueChange(val: string | null) {
+    if (!val) return;
+    setSelectedValue(val);
+    if (val === 'current') {
+      onSelectPreview(null);
+    } else {
+      const snap = snapshots.find((s) => s.id === val);
+      if (snap) onSelectPreview(snap.content);
+    }
+  }
+
+  function handleRestore() {
+    if (selectedValue && selectedValue !== 'current') {
+      onRestore(selectedValue);
+    }
+  }
+
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground">Version:</span>
-      <Select
-        defaultValue="current"
-        onValueChange={(val) => {
-          if (val === 'current') {
-            onSelectPreview(null);
-          } else {
-            const snap = snapshots.find((s) => s.id === val);
-            if (snap) onSelectPreview(snap.content);
-          }
-        }}
-      >
-        <SelectTrigger className="h-7 w-40 text-xs">
+    <div id="version-selector" className="version-selector flex items-center gap-2">
+      <span className="version-selector-label text-xs text-muted-foreground">Version:</span>
+      <Select value={selectedValue} onValueChange={handleValueChange}>
+        <SelectTrigger id="version-select" className="version-select-trigger h-7 w-40 text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -57,13 +67,10 @@ export function VersionSelector({
       <Button
         variant="ghost"
         size="sm"
-        className="h-7 text-xs"
-        disabled={restoring}
-        onClick={() => {
-          const selectEl = document.querySelector('[data-state="closed"]');
-          const val = selectEl?.getAttribute('data-value');
-          if (val && val !== 'current') onRestore(val);
-        }}
+        name="restore-version"
+        className="version-restore-btn h-7 text-xs"
+        disabled={restoring || selectedValue === 'current'}
+        onClick={handleRestore}
       >
         <RotateCcw className="w-3 h-3 mr-1" /> Restore
       </Button>

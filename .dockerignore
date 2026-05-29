@@ -3,7 +3,7 @@ node_modules
 .git
 .gitignore
 *.md
-demos
+!README.md
 docs
 .env
 .env.*
@@ -16,5 +16,13 @@ prisma/*.db-shm
 .idea
 .claude
 coverage
+test-results
+playwright-report
+blob-report
+playwright/.cache
 dist
 build
+bun.lock
+*.tmp*
+*.tsbuildinfo
+.github

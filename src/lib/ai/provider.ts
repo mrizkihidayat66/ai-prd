@@ -2,6 +2,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { prisma } from '@/lib/db';
+import { safeDecrypt } from '@/lib/crypto';
 
 export type ProviderConfig = {
   provider: string;
@@ -10,6 +11,9 @@ export type ProviderConfig = {
   apiKey: string | null;
   baseUrl: string | null;
   temperature: number;
+  maxTokens: number;
+  contextLength: number;
+  topP: number;
 };
 
 export async function getSettings(): Promise<ProviderConfig> {
@@ -21,7 +25,10 @@ export async function getSettings(): Promise<ProviderConfig> {
         id: 'default',
         provider: 'openai',
         model: 'gpt-4o',
-        temperature: 0.7,
+        temperature: 0,
+        maxTokens: 65536,
+        contextLength: 131072,
+        topP: 1,
       },
     });
   }
@@ -36,11 +43,25 @@ export async function getSettings(): Promise<ProviderConfig> {
         provider: activeProvider,
         model: globalSettings.model,
         temperature: globalSettings.temperature,
+        maxTokens: globalSettings.maxTokens,
+        contextLength: globalSettings.contextLength,
+        topP: globalSettings.topP,
       },
     });
   }
 
-  return providerSettings;
+  // Decrypt apiKey from storage before returning
+  return {
+    provider: providerSettings.provider,
+    model: providerSettings.model,
+    customModels: providerSettings.customModels,
+    apiKey: safeDecrypt(providerSettings.apiKey),
+    baseUrl: providerSettings.baseUrl,
+    temperature: providerSettings.temperature,
+    maxTokens: providerSettings.maxTokens,
+    contextLength: providerSettings.contextLength,
+    topP: providerSettings.topP,
+  };
 }
 
 export function getProvider(config: ProviderConfig) {

@@ -28,14 +28,20 @@ type Props = {
 };
 
 export function RequirementsSummary({ summary, onGenerate, generating }: Props) {
+  // Guard against undefined/invalid summary
+  if (!summary || typeof summary !== 'object') {
+    return null;
+  }
+  
+  const coreFeatures = Array.isArray(summary.coreFeatures) ? summary.coreFeatures : [];
   return (
-    <div className="my-3 rounded-xl border border-green-500/30 bg-green-500/5 p-5">
-      <div className="flex items-center gap-2 mb-4">
+    <div id="requirements-summary" className="requirements-summary my-3 rounded-xl border border-green-500/30 bg-green-500/5 p-5">
+      <div className="requirements-summary-header flex items-center gap-2 mb-4">
         <CheckCircle2 className="w-5 h-5 text-green-500" />
         <h3 className="font-semibold text-sm">Requirements Complete</h3>
       </div>
 
-      <div className="space-y-3 text-xs">
+      <div className="requirements-summary-details space-y-3 text-xs">
         <div>
           <span className="font-medium text-muted-foreground">Project:</span>{' '}
           <span>{summary.projectName}</span>
@@ -51,7 +57,7 @@ export function RequirementsSummary({ summary, onGenerate, generating }: Props) 
         <div>
           <span className="font-medium text-muted-foreground">Core Features:</span>
           <ul className="list-disc list-inside ml-2 mt-1 space-y-0.5">
-            {summary.coreFeatures.map((f, i) => (
+            {coreFeatures.map((f, i) => (
               <li key={i}>{f}</li>
             ))}
           </ul>
@@ -75,9 +81,10 @@ export function RequirementsSummary({ summary, onGenerate, generating }: Props) 
       </div>
 
       <Button
+        name="generate-prd"
         onClick={onGenerate}
         disabled={generating}
-        className="w-full mt-5"
+        className="requirements-generate-btn w-full mt-5"
       >
         <Rocket className="w-4 h-4 mr-2" />
         {generating ? 'Generating PRD...' : 'Generate PRD'}

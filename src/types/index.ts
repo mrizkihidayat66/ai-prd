@@ -7,6 +7,44 @@ export type ProjectStatus =
 
 export type MessageRole = 'USER' | 'ASSISTANT' | 'SYSTEM';
 
+// Message part types for full UI message persistence
+export type MessagePartText = {
+  type: 'text';
+  text: string;
+};
+
+export type MessagePartToolCall = {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+};
+
+export type MessagePartToolResult = {
+  type: 'tool-result';
+  toolCallId: string;
+  toolName: string;
+  result: unknown;
+};
+
+export type MessagePart = MessagePartText | MessagePartToolCall | MessagePartToolResult;
+
+// Project reference types (for @url, @path, @git, @npm mentions)
+export type ProjectReferenceKind = 'url' | 'path' | 'git' | 'npm';
+
+export type ProjectReference = {
+  kind: ProjectReferenceKind;
+  value: string;
+  label?: string;
+  addedAt?: string;
+};
+
+// Project tag types
+export type ProjectTag = {
+  name: string;
+  color?: string;
+};
+
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   CLARIFYING: 'Clarifying',
   REQUIREMENTS_LOCKED: 'Requirements Locked',
@@ -28,6 +66,9 @@ export type ProjectSummary = {
   name: string;
   description: string | null;
   status: string;
+  tags?: ProjectTag[];
+  references?: ProjectReference[];
+  metadata?: string | null;
   createdAt: string;
   updatedAt: string;
   plan: { id: string; version: number } | null;
@@ -38,6 +79,7 @@ export type ConversationEntry = {
   id: string;
   role: string;
   content: string;
+  parts?: string; // JSON string of MessagePart[]
   createdAt: string;
 };
 
@@ -46,6 +88,8 @@ export type ProjectDetail = {
   name: string;
   description: string | null;
   status: string;
+  tags?: ProjectTag[];
+  references?: ProjectReference[];
   createdAt: string;
   updatedAt: string;
   plan: { id: string; version: number; content: string | null } | null;

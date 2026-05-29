@@ -17,11 +17,15 @@ type Props = {
 export function WebSearchCard({ query, results }: Props) {
   const [expanded, setExpanded] = useState(false);
 
+  // Guard against undefined/invalid results
+  const safeResults = Array.isArray(results) ? results : [];
+
   return (
-    <div className="my-2 rounded-lg border border-border/40 bg-muted/10 overflow-hidden">
+    <div id="web-search-card" className="web-search-card my-2 rounded-lg border border-border/40 bg-muted/10 overflow-hidden">
       <button
+        name="toggle-search-results"
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/20 transition-colors"
+        className="web-search-toggle w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/20 transition-colors"
       >
         <Globe className="w-3.5 h-3.5 shrink-0" />
         <span className="truncate">Searched: {query}</span>
@@ -30,11 +34,11 @@ export function WebSearchCard({ query, results }: Props) {
         </span>
       </button>
       {expanded && (
-        <div className="px-3 pb-3 space-y-2 border-t border-border/30">
-          {results.length === 0 ? (
+        <div className="web-search-results px-3 pb-3 space-y-2 border-t border-border/30">
+          {safeResults.length === 0 ? (
             <p className="text-xs text-muted-foreground pt-2">No results found.</p>
           ) : (
-            results.map((r, i) => (
+            safeResults.map((r, i) => (
               <div key={i} className="pt-2">
                 <a
                   href={r.url}

@@ -8,26 +8,53 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum ProjectStatus {
+  CLARIFYING
+  REQUIREMENTS_LOCKED
+  GENERATING
+  PLAN_GENERATED
+  COMPLETED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum LLMProvider {
+  openai
+  anthropic
+  google
+  ollama
+  lmstudio
+  agentrouter
+  openai_compatible
+}
+
 model Project {
-  id          String   @id @default(cuid())
+  id          String        @id @default(cuid())
   name        String
   description String?
-  status      String   @default("CLARIFYING") // CLARIFYING | REQUIREMENTS_LOCKED | GENERATING | PLAN_GENERATED | COMPLETED
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status      ProjectStatus @default(CLARIFYING)
+  tags        String?       // JSON array of ProjectTag objects
+  references  String?       // JSON array of ProjectReference objects
+  metadata    String?       // JSON object for validation results, task breakdown, etc.
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   conversations Conversation[]
   plan          Plan?
 }
 
 model Conversation {
-  id        String   @id @default(cuid())
+  id        String      @id @default(cuid())
   projectId String
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  role      String   // USER | ASSISTANT | SYSTEM
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role      MessageRole
   content   String
-  metadata  String?  // JSON string for tool calls, etc.
-  createdAt DateTime @default(now())
+  parts     String?     // JSON array of full UI message parts (text, tool-call, tool-result)
+  createdAt DateTime    @default(now())
 }
 
 model Plan {
@@ -52,12 +79,59 @@ model PlanSnapshot {
 }
 
 model Settings {
-  id           String   @id @default("default")
-  provider     String   @default("anthropic") // openai | anthropic | google | ollama
-  model        String   @default("claude-sonnet-4-20250514")
-  customModels String?  // comma-separated custom model list
-  apiKey       String?
-  baseUrl      String?  // for Ollama or custom endpoints
-  temperature  Float    @default(0.7)
-  updatedAt    DateTime @updatedAt
+  id           String      @id @default("default")
+  provider     LLMProvider @default(anthropic)
+  model        String      @default("claude-sonnet-4-20250514")
+  customModels String?     // comma-separated custom model list
+  apiKey            String?
+  baseUrl           String?     // for Ollama or custom endpoints
+  temperature       Float       @default(0)
+  maxTokens         Int         @default(65536)  // 64k default
+  contextLength     Int         @default(131072) // 128k default
+  topP              Float       @default(1)
+  updatedAt         DateTime    @updatedAt
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  icon        String   @default("FileText") // Lucide icon name
+  category    String   @default("custom")   // built-in | custom
+  prompt      String   // Context prompt sent to AI
+  structure   String?  // JSON: section headings/outline from source PRD
+  sourceProjectId String? // Project this was derived from
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Integration {
+  id          String   @id // "github" | "linear" | "jira"
+  enabled     Boolean  @default(false)
+  token       String?  // Encrypted PAT/API key
+  baseUrl     String?  // Custom instance URL (e.g. Jira cloud URL)
+  metadata    String?  // JSON: { owner, repo } for GitHub, { teamId } for Linear, { projectKey } for Jira
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  projectId String
+  section   String   // Section heading or identifier the comment is attached to
+  content   String   // Comment text (markdown supported)
+  author    String   @default("Anonymous") // Lightweight author name
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  projectId String   @unique // One active review per project
+  status    String   @default("draft") // draft | in_review | changes_requested | approved
+  reviewer  String?  // Reviewer name
+  notes     String?  // Reviewer notes/feedback
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, KeyboardEvent } from 'react';
-import { Settings2 } from 'lucide-react';
+import { Settings2, ChevronDown, ChevronUp, Plug } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { IntegrationsSettings } from './integrations-settings';
 
 type SettingsData = {
   provider: string;
@@ -20,6 +23,9 @@ type SettingsData = {
   apiKey: string | null;
   baseUrl: string | null;
   temperature: number;
+  maxTokens: number;
+  contextLength: number;
+  topP: number;
 };
 
 const PROVIDER_MODELS: Record<string, string[]> = {
@@ -45,8 +51,12 @@ export function SettingsDialog({
     customModels: null,
     apiKey: null,
     baseUrl: null,
-    temperature: 0.7,
+    temperature: 0,
+    maxTokens: 65536,
+    contextLength: 131072,
+    topP: 1,
   });
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [modelTagInput, setModelTagInput] = useState('');
   const [saving, setSaving] = useState(false);
@@ -79,6 +89,7 @@ export function SettingsDialog({
         })
         .catch((error) => {
           console.error('Failed to load settings', error);
+          toast.error('Failed to load settings');
         });
     }
   }, [open, settings.provider]);
@@ -93,21 +104,31 @@ export function SettingsDialog({
         customModels: settings.customModels,
         baseUrl: settings.baseUrl,
         temperature: settings.temperature,
+        maxTokens: settings.maxTokens,
+        contextLength: settings.contextLength,
+        topP: settings.topP,
       };
       if (apiKeyInput) {
         payload.apiKey = apiKeyInput;
       }
       payload.makeActive = true; // Make this provider globally active when saving
 
-      await fetch('/api/settings', {
+      const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      setStatus('saved');
-      setTimeout(() => setStatus('idle'), 2000);
-    } catch {
+      
+      if (res.ok) {
+        setStatus('saved');
+        toast.success('Settings saved successfully');
+        setTimeout(() => setStatus('idle'), 2000);
+      } else {
+        throw new Error('Failed to save settings');
+      }
+    } catch (error) {
       setStatus('error');
+      toast.error('Failed to save settings');
     }
     setSaving(false);
   }
@@ -131,17 +152,25 @@ export function SettingsDialog({
         body: JSON.stringify(payload),
       });
       const data = await readJsonSafe(res);
-      setTestResult(
-        data
-          ? {
-              success: Boolean(data.success),
-              text: typeof data.text === 'string' ? data.text : undefined,
-              error: typeof data.error === 'string' ? data.error : undefined,
-            }
-          : { success: false, error: 'Empty response from test endpoint' }
-      );
+      const result = data
+        ? {
+            success: Boolean(data.success),
+            text: typeof data.text === 'string' ? data.text : undefined,
+            error: typeof data.error === 'string' ? data.error : undefined,
+          }
+        : { success: false, error: 'Empty response from test endpoint' };
+      
+      setTestResult(result);
+      
+      if (result.success) {
+        toast.success('Connection test successful');
+      } else {
+        toast.error('Connection test failed', { description: result.error });
+      }
     } catch (error: unknown) {
-      setTestResult({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      setTestResult({ success: false, error: errorMsg });
+      toast.error('Connection test failed', { description: errorMsg });
     }
     setTesting(false);
   }
@@ -186,13 +215,26 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md bg-card/95 backdrop-blur-xl border-border/40">
+      <DialogContent id="settings-dialog" className="settings-dialog sm:max-w-lg bg-card border-border max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-lg font-semibold flex items-center gap-2">
-            <Settings2 className="w-4 h-4" /> LLM Provider Settings
+          <DialogTitle className="settings-dialog-title text-lg font-semibold flex items-center gap-2">
+            <Settings2 className="w-4 h-4" /> Settings
           </DialogTitle>
         </DialogHeader>
 
+        <Tabs defaultValue="llm" className="settings-tabs w-full">
+          <TabsList className="settings-tabs-list w-full">
+            <TabsTrigger value="llm" name="tab-llm" className="flex-1 text-xs">
+              <Settings2 className="h-3.5 w-3.5 mr-1.5" />
+              LLM Provider
+            </TabsTrigger>
+            <TabsTrigger value="integrations" name="tab-integrations" className="flex-1 text-xs">
+              <Plug className="h-3.5 w-3.5 mr-1.5" />
+              Integrations
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="llm">
         <div className="space-y-5 py-2">
           {/* Provider */}
           <div className="space-y-2">
@@ -220,7 +262,7 @@ export function SettingsDialog({
           </div>
 
           {/* Model Config (2-Step Manual List) */}
-          <div className="space-y-4 pt-2 border-t border-border/40">
+          <div className="space-y-4 pt-2 border-t border-border">
             <div className="space-y-2">
               <Label>Available Models List</Label>
               <div className="bg-muted/50 border border-input rounded-md p-2 min-h-[42px]">
@@ -318,25 +360,107 @@ export function SettingsDialog({
             </div>
           )}
 
-          {/* Temperature */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Temperature</Label>
-              <span className="text-sm font-mono text-muted-foreground">
-                {settings.temperature.toFixed(1)}
-              </span>
-            </div>
-            <input
-              id="settings-temperature"
-              name="temperature"
-              type="range"
-              min={0}
-              max={1}
-              step={0.1}
-              value={settings.temperature}
-              onChange={(e) => setSettings({ ...settings, temperature: parseFloat(e.target.value) })}
-              className="w-full accent-indigo-500 h-2 bg-muted rounded-lg appearance-none cursor-pointer"
-            />
+          {/* Advanced Settings - Collapsible */}
+          <div className="border-t border-border pt-4">
+            <button
+              type="button"
+              name="toggle-advanced-settings"
+              onClick={() => setAdvancedOpen(!advancedOpen)}
+              className="settings-advanced-toggle flex items-center justify-between w-full text-sm font-medium hover:text-foreground transition-colors"
+            >
+              <span>Advanced Settings</span>
+              {advancedOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+
+            {advancedOpen && (
+              <div className="mt-4 space-y-4 pl-2 border-l-2 border-muted">
+                {/* Temperature */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="settings-temperature">Temperature</Label>
+                    <span className="text-sm font-mono text-muted-foreground">
+                      {settings.temperature.toFixed(1)}
+                    </span>
+                  </div>
+                  <Input
+                    id="settings-temperature"
+                    name="temperature"
+                    type="number"
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    value={settings.temperature}
+                    onChange={(e) => setSettings({ ...settings, temperature: parseFloat(e.target.value) || 0 })}
+                    className="bg-muted/50 font-mono text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground leading-tight">
+                    Controls randomness. 0 = deterministic, higher = more creative.
+                  </p>
+                </div>
+
+                {/* Context Length */}
+                <div className="space-y-2">
+                  <Label htmlFor="settings-context-length">Context Length</Label>
+                  <Input
+                    id="settings-context-length"
+                    name="contextLength"
+                    type="number"
+                    min={1024}
+                    max={1000000}
+                    step={1024}
+                    value={settings.contextLength}
+                    onChange={(e) => setSettings({ ...settings, contextLength: parseInt(e.target.value) || 131072 })}
+                    className="bg-muted/50 font-mono text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground leading-tight">
+                    Maximum input tokens. Default: 128k (131072)
+                  </p>
+                </div>
+
+                {/* Max Tokens */}
+                <div className="space-y-2">
+                  <Label htmlFor="settings-max-tokens">Max Tokens</Label>
+                  <Input
+                    id="settings-max-tokens"
+                    name="maxTokens"
+                    type="number"
+                    min={1024}
+                    max={200000}
+                    step={1024}
+                    value={settings.maxTokens}
+                    onChange={(e) => setSettings({ ...settings, maxTokens: parseInt(e.target.value) || 65536 })}
+                    className="bg-muted/50 font-mono text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground leading-tight">
+                    Maximum output tokens. Default: 64k (65536)
+                  </p>
+                </div>
+
+                {/* Top P */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="settings-top-p">Top P</Label>
+                    <span className="text-sm font-mono text-muted-foreground">
+                      {settings.topP.toFixed(2)}
+                    </span>
+                  </div>
+                  <Input
+                    id="settings-top-p"
+                    name="topP"
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={settings.topP}
+                    onChange={(e) => setSettings({ ...settings, topP: parseFloat(e.target.value) || 1 })}
+                    className="bg-muted/50 font-mono text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground leading-tight">
+                    Nucleus sampling. 1 = consider all tokens, lower = more focused.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Save & Test */}
@@ -356,10 +480,11 @@ export function SettingsDialog({
             <div className="flex items-center justify-between">
               <Button
                 id="btn-test-connection"
+                name="test-connection"
                 variant="outline"
                 onClick={handleTest}
                 disabled={testing}
-                className="border-border/40 hover:bg-primary/10 transition-colors"
+                className="settings-test-btn border-border hover:bg-primary/10 transition-colors"
                 type="button"
               >
                 {testing ? 'Testing...' : 'Test Connection'}
@@ -374,9 +499,10 @@ export function SettingsDialog({
                 )}
                 <Button
                   id="btn-save-settings"
+                  name="save-settings"
                   onClick={handleSave}
                   disabled={saving}
-                  className=""
+                  className="settings-save-btn"
                 >
                   {saving ? 'Saving...' : 'Save Configuration'}
                 </Button>
@@ -384,6 +510,12 @@ export function SettingsDialog({
             </div>
           </div>
         </div>
+          </TabsContent>
+
+          <TabsContent value="integrations">
+            <IntegrationsSettings />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

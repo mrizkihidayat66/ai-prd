@@ -184,23 +184,70 @@ sequenceDiagram
     C-->>U: Display
 \`\`\`
 
+## 17. References & Resources
+
+List all external references mentioned during requirements gathering:
+
+- **URLs**: Documentation, APIs, design inspiration
+- **Repositories**: Example projects, libraries, frameworks
+- **Packages**: NPM/PyPI packages to evaluate
+- **Files**: Specification documents, design files
+
+Format each as:
+- [{Type}] {Description}: {URL/Path}
+
 ## Rules
 
+- **STRICT STRUCTURE**: Output EXACTLY the 17 sections defined above — no more, no fewer. Do NOT add any \`##\` section beyond "17. References & Resources" (no Glossary, Open Questions, Decisions Needed, Launch Readiness, Success Criteria, or extra Appendix sections). Do NOT rename, renumber, reorder, or remove any section. Additional \`###\` sub-sections WITHIN a canonical section are allowed.
 - Output ONLY well-formatted Markdown. No JSON wrapping, no code fences around the entire document.
 - Be thorough and specific — this document will be used by AI coding agents to implement the project.
 - Use real, concrete examples based on the gathered requirements (not placeholder text).
-- All Mermaid diagrams must use valid syntax. Entity names in erDiagram must be PascalCase with no spaces. Relationship labels must be quoted.
+- **CRITICAL Mermaid Diagram Rules** (follow strictly to avoid render failures):
+  - Entity names in erDiagram must be PascalCase with NO spaces or special characters.
+  - Relationship labels in erDiagram MUST be quoted: \`User ||--o{ Post : "creates"\`
+  - Node labels containing special characters (&, <, >, {, }) MUST be wrapped in double quotes: \`A["User Sign-up & Login"]\`
+  - Do NOT use semicolons at end of lines.
+  - Do NOT use HTML tags or entities in labels (no &amp; &lt; &gt;).
+  - Use simple, short labels (max 40 chars). Avoid complex punctuation in labels.
+  - flowchart/graph: Use \`TD\` or \`LR\` direction. Arrow syntax: \`-->\`, \`---\`, \`-.->|\`, \`==>\`.
+  - sequenceDiagram: Use \`->>>\` for async, \`->>\` for sync, \`-->>>\` for async return. Participant aliases must be simple alphanumeric.
+  - erDiagram: Field types must be simple words (string, int, boolean, datetime). No spaces in type names.
+  - Do NOT add \`style\`, \`classDef\`, \`class\`, or \`click\` directives — they often cause parse errors.
+  - Keep diagrams focused: max 15 nodes for flowcharts, max 8 entities for ERD, max 6 participants for sequence diagrams.
 - Cross-reference between sections where relevant (e.g., "See User Stories US-3" in the feature spec).
 - The document should be 2000-4000 words depending on project complexity.
+- **If you approach token limits**: Prioritize completing sections 1-12 fully rather than starting all 17 sections. A complete, detailed PRD covering core sections is better than an incomplete document with all section headers.
 - Write in English unless the conversation was conducted in another language.
+- **CRITICAL**: When you have fully completed ALL sections of the PRD, end the document with the exact marker \`<!-- PRD_COMPLETE -->\` on its own line. This signals the document is fully generated. Do NOT include this marker if you were cut off or did not finish all sections.
 `;
 
 export function buildPrdUserPrompt(
-  conversations: Array<{ role: string; content: string }>
+  conversations: Array<{ role: string; content: string }>,
+  references?: Array<{ kind: string; value: string; label?: string }>,
+  researchData?: unknown,
+  architectureData?: unknown
 ): string {
   const history = conversations
     .map((c) => `**${c.role}**: ${c.content}`)
     .join('\n\n');
 
-  return `Here is the complete conversation history with all gathered requirements:\n\n${history}\n\nBased on this conversation, generate the complete PRD document now.`;
+  let referencesSection = '';
+  if (references && references.length > 0) {
+    referencesSection = '\n\n## Referenced Resources\n\nThe following external resources were mentioned during requirements gathering:\n\n';
+    referencesSection += references
+      .map((ref) => `- [${ref.kind.toUpperCase()}] ${ref.label || ref.value}: ${ref.value}`)
+      .join('\n');
+  }
+
+  let researchSection = '';
+  if (researchData) {
+    researchSection = '\n\n## Research Findings (from Research Agent)\n\nThe following market research, competitor analysis, and best practices were gathered by a specialized research agent. Incorporate these insights into the PRD (especially in sections: Problem Statement, Target Users, Risks & Mitigations, and References):\n\n```json\n' + JSON.stringify(researchData, null, 2) + '\n```';
+  }
+
+  let architectureSection = '';
+  if (architectureData) {
+    architectureSection = '\n\n## Architecture Recommendations (from Architecture Agent)\n\nThe following architecture analysis was produced by a specialized architecture agent. Use these recommendations for the System Architecture, Technology Stack, and API Design sections:\n\n```json\n' + JSON.stringify(architectureData, null, 2) + '\n```';
+  }
+
+  return `Here is the complete conversation history with all gathered requirements:\n\n${history}${referencesSection}${researchSection}${architectureSection}\n\nBased on this conversation and the agent research/architecture analysis above, generate the complete PRD document now.`;
 }

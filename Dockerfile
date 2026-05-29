@@ -28,10 +28,17 @@ COPY --from=builder /app/src/generated ./src/generated
 
 RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
 
+# Install sqlite for runtime migrations
+RUN apk add --no-cache sqlite
+
+# Startup script that handles DB migration
+COPY scripts/start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 ENV DATABASE_URL="file:/app/data/prod.db"
 
-CMD ["sh", "-c", "if [ ! -f /app/data/prod.db ]; then cp /app/prisma/template.db /app/data/prod.db; fi && node server.js"]
+CMD ["/app/start.sh"]

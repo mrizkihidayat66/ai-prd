@@ -3,7 +3,12 @@ import type { ProjectSummary, ProjectDetail } from '@/types';
 async function readJson<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text) throw new Error(`Empty response from ${res.url}`);
-  const data = JSON.parse(text) as T;
+  let data: T;
+  try {
+    data = JSON.parse(text) as T;
+  } catch {
+    throw new Error(`Invalid JSON response from ${res.url} (HTTP ${res.status})`);
+  }
   if (!res.ok) {
     const err = (data as Record<string, unknown>).error;
     throw new Error(typeof err === 'string' ? err : `HTTP ${res.status}`);
@@ -42,4 +47,13 @@ export async function fetchProject(id: string): Promise<ProjectDetail> {
     await fetch(`/api/projects/${id}`, { cache: 'no-store' })
   );
   return data.project;
+}
+
+export async function duplicateProject(id: string): Promise<string> {
+  const data = await readJson<{ project: { id: string } }>(
+    await fetch(`/api/projects/${id}/duplicate`, {
+      method: 'POST',
+    })
+  );
+  return data.project.id;
 }
